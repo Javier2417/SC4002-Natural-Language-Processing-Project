@@ -1,3 +1,7 @@
+SC4002-Natural-Language-Processing-Project/nlp_env
+.data/
+.vector_cache/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
