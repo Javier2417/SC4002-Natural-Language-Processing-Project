@@ -73,4 +73,4 @@ def create_embedding_layer(freeze=False):
     
     return embedding_layer
 
-print("Artifact file 'data_pipeline.py' created successfully.")
+
