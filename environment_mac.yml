@@ -1,0 +1,23 @@
+name: sc4002
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pytorch::pytorch=2.4.1
+  - pytorch::torchvision=0.19.1
+  - pytorch::torchaudio=2.4.1
+  - numpy<2.0
+  - matplotlib
+  - scikit-learn
+  - jupyter
+  - notebook
+  - ipykernel
+  - nltk
+  - spacy
+  - pip
+  - pip:
+      - torchtext==0.18.0
+      - portalocker
+      - en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
