@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from torchtext import data, datasets
 import random
+import numpy as np
 
 # 1. Set random seeds for reproducibility
 SEED = 42
@@ -74,3 +75,11 @@ def create_embedding_layer(freeze=False):
     return embedding_layer
 
 
+# from data_pipeline import (
+#     train_iterator, 
+#     valid_iterator, 
+#     test_iterator, 
+#     TEXT, 
+#     LABEL, 
+#     create_embedding_layer
+# )
