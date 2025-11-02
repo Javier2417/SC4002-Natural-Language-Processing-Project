@@ -79,7 +79,13 @@ def create_embedding_layer(freeze=False):
 #     train_iterator, 
 #     valid_iterator, 
 #     test_iterator, 
+#     train_dataset,
+#     valid_dataset,
+#     test_data,
 #     TEXT, 
 #     LABEL, 
-#     create_embedding_layer
+#     create_embedding_layer,
+#     device,
+#     BATCH_SIZE
 # )
+
