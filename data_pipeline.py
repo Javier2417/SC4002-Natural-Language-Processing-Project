@@ -5,6 +5,7 @@
 
 import torch
 import torch.nn as nn
+import torchtext
 from torchtext import data, datasets
 import random
 import numpy as np
