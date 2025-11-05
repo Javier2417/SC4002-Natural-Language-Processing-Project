@@ -16,6 +16,9 @@ np.random.seed(SEED)
 random.seed(SEED)
 torch.backends.cudnn.deterministic = True
 
+assert torchtext.__version__.startswith("0.4."), \
+    f"Expected torchtext 0.4.x, got {torchtext.__version__}"
+
 # 2. Define Fields (as per PDF)
 # We define these at the top level so they can be imported
 TEXT = data.Field(tokenize='spacy', 
@@ -58,19 +61,32 @@ def create_embedding_layer(freeze=False):
     """
     Loads the pre-trained GloVe vectors from the TEXT vocab
     into a learnable nn.Embedding layer.
-    """
-    # Get the embedding matrix from the vocab
-    pretrained_embeddings = TEXT.vocab.vectors
     
-    # Create the embedding layer
-    embedding_layer = nn.Embedding.from_pretrained(
-        pretrained_embeddings, 
-        freeze=freeze # Set to False to make it learnable
+    This version correctly handles the <pad> token by:
+    1. Setting padding_idx in the Embedding constructor.
+    2. Manually copying the weights.
+    3. Manually zeroing out the padding vector.
+    """
+    
+    # 1. Get info from the vocab
+    pretrained_embeddings = TEXT.vocab.vectors
+    pad_idx = TEXT.vocab.stoi[TEXT.pad_token]
+    
+    # 2. Create the embedding layer, specifying the pad_idx
+    embedding_layer = nn.Embedding(
+        pretrained_embeddings.size(0), 
+        pretrained_embeddings.size(1), 
+        padding_idx=pad_idx
     )
     
-    # Set the padding token to be ignored by the model
-    padding_idx = TEXT.vocab.stoi[TEXT.pad_token]
-    embedding_layer.padding_idx = padding_idx
+    # 3. Copy the GloVe weights
+    embedding_layer.weight.data.copy_(pretrained_embeddings)
+    
+    # 4. Manually zero out the padding vector
+    embedding_layer.weight.data[pad_idx].zero_()
+    
+    # 5. Set the layer to be learnable
+    embedding_layer.weight.requires_grad = not freeze
     
     return embedding_layer
 
