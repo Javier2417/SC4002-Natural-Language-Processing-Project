@@ -48,27 +48,63 @@ class EarlyStopping:
         self.best_weights = model.state_dict().copy()
 
 # Define RNN Model
-class RNN(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim, n_layers, dropout, embedding_layer=None):
+class RNNPooling(nn.Module):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim,
+                 n_layers, dropout, pooling="last", embedding_layer=None):
         super().__init__()
+        self.pooling = pooling
 
         if embedding_layer is not None:
             self.embedding = embedding_layer
         else:
-            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=TEXT.vocab.stoi[TEXT.pad_token])
+            self.embedding = nn.Embedding(
+                vocab_size,
+                embedding_dim,
+                padding_idx=TEXT.vocab.stoi[TEXT.pad_token]
+            )
+
         dropout = dropout if n_layers > 1 else 0.0
-        self.rnn = nn.RNN(embedding_dim, hidden_dim, num_layers=n_layers, dropout=dropout, batch_first=True)
+        self.rnn = nn.RNN(
+            embedding_dim,
+            hidden_dim,
+            num_layers=n_layers,
+            dropout=dropout,
+            batch_first=True
+        )
+
+        # Attention mechanism parameters
+        if pooling == "attention":
+            self.attn = nn.Linear(hidden_dim, 1)
+
         self.fc = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, text, text_lengths):
         embedded = self.dropout(self.embedding(text))
-
-        packed_embedded = nn.utils.rnn.pack_padded_sequence(embedded, text_lengths.cpu(), batch_first=True, enforce_sorted=False)
+        packed_embedded = nn.utils.rnn.pack_padded_sequence(
+            embedded, text_lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
         packed_output, hidden = self.rnn(packed_embedded)
-        # Take last layer
-        output = self.fc(hidden[-1])
-        return output
+        output, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True)
+
+        # Sentence representation strategies
+        if self.pooling == "last":
+            sent_repr = hidden[-1]
+
+        elif self.pooling == "mean":
+            sent_repr = output.mean(dim=1)
+
+        elif self.pooling == "max":
+            sent_repr, _ = output.max(dim=1)
+
+        elif self.pooling == "attention":
+            attn_weights = torch.softmax(self.attn(output).squeeze(-1), dim=1)
+            sent_repr = torch.sum(output * attn_weights.unsqueeze(-1), dim=1)
+
+        else:
+            raise ValueError(f"Unknown pooling: {self.pooling}")
+
+        return self.fc(sent_repr)
 
 # Create Model and Embeddings
 hidden_dim = 128
@@ -80,24 +116,6 @@ print("Creating embedding layer from TEXT.vocab...")
 embedding_layer = create_embedding_layer()
 embedding_dim = embedding_layer.embedding_dim if hasattr(embedding_layer, 'embedding_dim') else 300
 
-model = RNN(
-    vocab_size=len(TEXT.vocab),
-    embedding_dim=embedding_dim,
-    hidden_dim=hidden_dim,
-    output_dim=output_dim,
-    n_layers=n_layers,
-    dropout=dropout,
-    embedding_layer=embedding_layer
-)
-
-# Define Optimizer and Loss Function
-optimizer = optim.Adam(model.parameters())
-criterion = nn.CrossEntropyLoss()
-
-model = model.to(config.DEVICE)
-criterion = criterion.to(config.DEVICE)
-
-# Accuracy Function
 def accuracy(preds, y):
     top_pred = preds.argmax(1, keepdim=True)
     correct = top_pred.eq(y.view_as(top_pred)).sum()
@@ -162,30 +180,52 @@ val_losses = []
 val_accuracies = []
 epochs_completed = []
 
-print("Starting training with early stopping...")
-for epoch in range(N_EPOCHS):
-    train_loss, train_acc = train(model, train_iterator, optimizer, criterion)
-    valid_loss, valid_acc = evaluate(model, valid_iterator, criterion)
+pooling_methods = ["last", "mean", "max", "attention"]
+results = {}
 
-    # Store metrics for plotting
-    train_losses.append(train_loss)
-    train_accuracies.append(train_acc)
-    val_losses.append(valid_loss)
-    val_accuracies.append(valid_acc)
-    epochs_completed.append(epoch + 1)
+for method in pooling_methods:
+    print(f"\n----- Training with {method.upper()} pooling -----")
 
-    print(f'Epoch: {epoch+1:02} | Train Loss: {train_loss:.3f} | Train Acc: {train_acc:.2f}% | Val Loss: {valid_loss:.3f} | Val Acc: {valid_acc:.2f}%')
-    
-    # Check early stopping
-    if early_stopping(valid_loss, model):
-        print(f'Early stopping triggered at epoch {epoch+1}')
-        print(f'Best validation loss: {early_stopping.best_loss:.3f}')
-        break
+    model = RNNPooling(
+        vocab_size=len(TEXT.vocab),
+        embedding_dim=embedding_dim,
+        hidden_dim=hidden_dim,
+        output_dim=output_dim,
+        n_layers=n_layers,
+        dropout=dropout,
+        pooling=method,
+        embedding_layer=embedding_layer
+    ).to(config.DEVICE)
 
-# Evaluation
-test_loss, test_acc = evaluate(model, test_iterator, criterion)
-print(f'\nTest Loss: {test_loss:.3f} | Test Acc: {test_acc:.2f}%')
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    criterion = nn.CrossEntropyLoss().to(config.DEVICE)
+    early_stopping = EarlyStopping(patience=5, min_delta=0.01)
 
+    best_val_acc = 0
+    for epoch in range(config.N_EPOCHS):
+        train_loss, train_acc = train(model, train_iterator, optimizer, criterion)
+        val_loss, val_acc = evaluate(model, valid_iterator, criterion)
+
+        print(f"Epoch {epoch+1:02} | Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}%")
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), f"best_{method}.pt")
+
+        if early_stopping(val_loss, model):
+            print(f"Early stopping on epoch {epoch+1}")
+            break
+
+    model.load_state_dict(torch.load(f"best_{method}.pt", weights_only=True))
+    test_loss, test_acc = evaluate(model, test_iterator, criterion)
+    results[method] = test_acc
+    print(f"Test Accuracy ({method} pooling): {test_acc:.2f}%")
+
+print("\n----- Summary of Sentence Representation Methods -----")
+for method, acc in results.items():
+    print(f"{method.capitalize()} pooling → Test Accuracy: {acc:.2f}%")
+
+'''
 # Plot training progress
 def plot_training_progress(epochs, train_losses, val_losses, train_accs, val_accs):
     
@@ -216,7 +256,7 @@ def plot_training_progress(epochs, train_losses, val_losses, train_accs, val_acc
 
 # Create and save the training progress plot
 plot_training_progress(epochs_completed, train_losses, val_losses, train_accuracies, val_accuracies)
-
+'''
 # Save Model and Vocab
 torch.save(model.state_dict(), 'rnn_model.pt')
 print("Model saved to rnn_model.pt")

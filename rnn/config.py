@@ -5,7 +5,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Training hyperparameters
 BATCH_SIZE = 64
-N_EPOCHS = 10
+N_EPOCHS = 20
 LEARNING_RATE = 0.001
 
 # Model hyperparameters
